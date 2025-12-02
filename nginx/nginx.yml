@@ -1,0 +1,25 @@
+---
+- name: " Install and configure NGINX web server"
+  hosts: webservers
+  become: yes
+
+  tasks:
+    - name: "Install nginx"
+      yum: 
+        name: nginx
+        state: present
+    
+    - name: "start nginx"
+      service:
+        name: nginx
+        state: started
+        enabled: true
+      vars:
+        ansible_user: ec2-user
+        ansible_private_key_file: "/home/afrin/configurations/nginx/ansible12.pem"
+    - name: Deploy custom index.html
+      copy:
+        src: index.html
+        dest: /usr/share/nginx/html/index.html
+        mode: '0644'
+
