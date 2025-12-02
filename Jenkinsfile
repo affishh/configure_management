@@ -2,10 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "yourdockerhubusername/myapp:latest"  // Replace with your Docker Hub username
-        APP_DIR = "configure_management"
-        DOCKERHUB_USER = credentials('dockerhub-username') // Jenkins credentials ID
-        DOCKERHUB_PASSWORD = credentials('dockerhub-password')
+        DOCKER_IMAGE = "myregistry.com/myapp:latest"
+        APP_DIR = "configuration_management"
     }
 
     stages {
@@ -18,29 +16,35 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh """
-                # Disable BuildKit if buildx not installed
-                DOCKER_BUILDKIT=0 docker build -t ${DOCKER_IMAGE} ${APP_DIR}
-                """
+                script {
+                    // Use Docker Buildx if available
+                    sh """
+                    if ! docker buildx version > /dev/null 2>&1; then
+                        docker buildx create --use
+                    fi
+                    docker build -t ${DOCKER_IMAGE} ${APP_DIR}
+                    """
+                }
             }
         }
 
         stage('Run Tests') {
             steps {
                 sh """
-                cd ${APP_DIR}
-                npm install
-                npm test || echo "No tests found"
+                cd ${APP_DIR} || exit 1
+                if [ -f package.json ]; then
+                    npm install
+                    npm test || echo "No tests found"
+                else
+                    echo "No package.json found, skipping tests"
+                fi
                 """
             }
         }
 
         stage('Push Image') {
             steps {
-                sh """
-                echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USER --password-stdin
-                docker push ${DOCKER_IMAGE}
-                """
+                sh "docker push ${DOCKER_IMAGE}"
             }
         }
 
@@ -56,9 +60,9 @@ pipeline {
         stage('Smoke Test GREEN') {
             steps {
                 sh """
-                GREEN_IP=$(kubectl get svc green-service -o jsonpath='{.spec.clusterIP}')
-                echo "Testing Green service at $GREEN_IP"
-                curl -f http://$GREEN_IP || exit 1
+                GREEN_IP=\\$(kubectl get svc green-service -o jsonpath='{.spec.clusterIP}')
+                echo "Testing Green service at \\$GREEN_IP"
+                curl -f http://\\$GREEN_IP || exit 1
                 """
             }
         }
