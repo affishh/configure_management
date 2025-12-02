@@ -2,36 +2,27 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "myregistry.com/myapp:latest"
+        // Docker image name and tag
+        IMAGE_NAME = 'myapp'
+        IMAGE_TAG = 'latest'
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/affishh/configure_management'
+                checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Detect folder containing Dockerfile
-                    def dockerDir = sh(
-                        script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!dockerDir) {
-                        error "No Dockerfile found in the repo!"
-                    } else {
-                        echo "Found Dockerfile in: ${dockerDir}"
-                    }
+                    // Find Dockerfile directory (if you have multiple)
+                    def dockerfileDir = sh(script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1", returnStdout: true).trim()
+                    echo "Found Dockerfile in: ${dockerfileDir}"
 
                     // Build Docker image
-                    sh """
-                        docker build -t ${DOCKER_IMAGE} ${dockerDir}
-                    """
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ${dockerfileDir}"
                 }
             }
         }
@@ -39,56 +30,43 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    def testDir = sh(script: "find . -type f -name package.json -exec dirname {} \\; | head -n 1", returnStdout: true).trim()
-                    if (testDir) {
-                        sh """
-                            cd ${testDir}
-                            npm install
-                            npm test || echo "No tests found"
-                        """
-                    } else {
-                        echo "No package.json found, skipping tests"
-                    }
+                    // Assuming Node.js app; adjust if needed
+                    sh "npm install"
+                    sh "npm test"
                 }
             }
         }
 
         stage('Push Image') {
             steps {
-                sh "docker push ${DOCKER_IMAGE}"
-            }
-        }
-
-        stage('Deploy GREEN Environment') {
-            steps {
-                sh """
-                    kubectl apply -f kubernetes/deployment-green.yaml
-                    kubectl apply -f kubernetes/service.yaml
-                """
-            }
-        }
-
-        stage('Smoke Test GREEN') {
-            steps {
-                sh """
-                    curl -f http://GREEN-SERVICE-IP || exit 1
-                """
-            }
-        }
-
-        stage('Switch Traffic BLUE → GREEN') {
-            steps {
-                sh "kubectl apply -f kubernetes/production-service-green.yaml"
+                script {
+                    // Docker Hub credentials stored in Jenkins (Credentials ID: dockerhub-cred)
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        
+                        // Login to Docker Hub
+                        sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
+                        
+                        // Tag the image correctly
+                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
+                        
+                        // Push to Docker Hub
+                        sh "docker push $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
             }
         }
     }
 
     post {
-        failure {
-            echo "Deployment Failed – Blue environment still active!"
+        always {
+            echo 'Cleaning up...'
+            sh "docker logout"
         }
         success {
-            echo "Green environment deployed successfully!"
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
