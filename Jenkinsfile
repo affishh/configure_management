@@ -4,9 +4,11 @@ pipeline {
     environment {
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = 'latest'
+        DOCKER_USER = 'afrin898'   // FIX: Make docker username available in all stages
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 checkout scm
@@ -16,11 +18,13 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
+                    // Find folder containing dockerfile
                     def dockerfileDir = sh(
                         script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1",
                         returnStdout: true
                     ).trim()
-                    echo "Found Dockerfile in: ${dockerfileDir}"
+
+                    echo "Dockerfile found in: ${dockerfileDir}"
 
                     sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ${dockerfileDir}"
                 }
@@ -39,10 +43,13 @@ pipeline {
         stage('Push Image') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
-                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
-                        sh "docker push $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', 
+                        usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+
+                        sh "echo $PASS | docker login -u $USER --password-stdin"
+
+                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
@@ -51,11 +58,13 @@ pipeline {
         stage('Deploy Green') {
             steps {
                 script {
-                    // Stop old green container if exists
+                    echo "Deploying GREEN container..."
+
+                    // Stop old green if exists
                     sh "docker rm -f myapp-green || true"
-                    
-                    // Run new version as green
-                    sh "docker run -d --name myapp-green -p 4000:80 $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
+
+                    // Start NEW version as GREEN
+                    sh "docker run -d --name myapp-green -p 4000:80 ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
@@ -63,7 +72,9 @@ pipeline {
         stage('Test Green') {
             steps {
                 script {
-                    // Simple health check
+                    echo "Performing health check on GREEN..."
+
+                    sh "sleep 3"  // give container time to start
                     sh "curl -f http://localhost:4000 || exit 1"
                 }
             }
@@ -72,13 +83,15 @@ pipeline {
         stage('Switch Traffic to Green') {
             steps {
                 script {
-                    // Stop old blue container if exists
+                    echo "Switching traffic to GREEN..."
+
+                    // Stop old BLUE
                     sh "docker rm -f myapp-blue || true"
 
-                    // Rename green to blue for next deployment
+                    // GREEN becomes BLUE
                     sh "docker rename myapp-green myapp-blue"
 
-                    echo "Blue-Green deployment complete. Traffic switched to new version!"
+                    echo "Blue-Green deployment complete!"
                 }
             }
         }
@@ -86,14 +99,14 @@ pipeline {
 
     post {
         always {
-            echo 'Cleaning up...'
-            sh "docker logout"
+            echo "Cleaning up..."
+            sh "docker logout || true"
         }
         success {
-            echo 'Pipeline completed successfully!'
+            echo "Pipeline completed successfully!"
         }
         failure {
-            echo 'Pipeline failed. Check logs for details.'
+            echo "Pipeline failed — check logs!"
         }
     }
 }
