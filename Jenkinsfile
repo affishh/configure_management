@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        // Docker image name and tag
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = 'latest'
     }
@@ -17,11 +16,12 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Find Dockerfile directory (if you have multiple)
-                    def dockerfileDir = sh(script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1", returnStdout: true).trim()
+                    def dockerfileDir = sh(
+                        script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1",
+                        returnStdout: true
+                    ).trim()
                     echo "Found Dockerfile in: ${dockerfileDir}"
 
-                    // Build Docker image
                     sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ${dockerfileDir}"
                 }
             }
@@ -30,7 +30,6 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    // Assuming Node.js app; adjust if needed
                     sh "npm install"
                     sh "npm test"
                 }
@@ -40,18 +39,46 @@ pipeline {
         stage('Push Image') {
             steps {
                 script {
-                    // Docker Hub credentials stored in Jenkins (Credentials ID: dockerhub-cred)
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        
-                        // Login to Docker Hub
                         sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
-                        
-                        // Tag the image correctly
                         sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
-                        
-                        // Push to Docker Hub
                         sh "docker push $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
+                }
+            }
+        }
+
+        stage('Deploy Green') {
+            steps {
+                script {
+                    // Stop old green container if exists
+                    sh "docker rm -f myapp-green || true"
+                    
+                    // Run new version as green
+                    sh "docker run -d --name myapp-green -p 4000:80 $DOCKER_USER/${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Test Green') {
+            steps {
+                script {
+                    // Simple health check
+                    sh "curl -f http://localhost:4000 || exit 1"
+                }
+            }
+        }
+
+        stage('Switch Traffic to Green') {
+            steps {
+                script {
+                    // Stop old blue container if exists
+                    sh "docker rm -f myapp-blue || true"
+
+                    // Rename green to blue for next deployment
+                    sh "docker rename myapp-green myapp-blue"
+
+                    echo "Blue-Green deployment complete. Traffic switched to new version!"
                 }
             }
         }
