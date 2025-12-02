@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = 'latest'
-        DOCKER_USER = 'afrin898'   // FIX: Make docker username available in all stages
+        DOCKER_USER = 'afrin898'   
     }
 
     stages {
@@ -18,7 +18,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Find folder containing dockerfile
+                    
                     def dockerfileDir = sh(
                         script: "find . -type f -name Dockerfile -exec dirname {} \\; | head -n 1",
                         returnStdout: true
@@ -64,7 +64,7 @@ pipeline {
                     sh "docker rm -f myapp-green || true"
 
                     // Start NEW version as GREEN
-                    sh "docker run -d --name myapp-green -p 4000:80 ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker run -d --name myapp-green -p  4000:5000 ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
